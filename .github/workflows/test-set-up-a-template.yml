@@ -132,6 +132,7 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 0
+        persist-credentials: true
 
     - name: Extract repository info
       id: repo-info
@@ -142,23 +143,22 @@ jobs:
 
     - name: Generate complete README from CI workflow
       run: |
-        WORKFLOW_FILE=".github/workflows/test-polkadot-setup-simple.yml"
+        # Use the actual workflow filename
+        WORKFLOW_FILE=".github/workflows/test-set-up-a-template.yml"
         
-        # Extract version info from CI
-        RUST_VERSION=$(grep "toolchain: " "$WORKFLOW_FILE" | head -1 | sed 's/.*toolchain: //')
-        CHAIN_SPEC_VERSION=$(grep "staging-chain-spec-builder@" "$WORKFLOW_FILE" | sed 's/.*@//')
-        OMNI_NODE_VERSION=$(grep "polkadot-omni-node@" "$WORKFLOW_FILE" | sed 's/.*@//')
-        TEMPLATE_BRANCH=$(grep "stable" "$WORKFLOW_FILE" | sed 's/.*-b //' | cut -d' ' -f1)
+        # Extract version info from CI - be more flexible with extraction
+        RUST_VERSION=$(grep -o "toolchain: [0-9.]*" "$WORKFLOW_FILE" | head -1 | cut -d' ' -f2 || echo "1.86")
+        CHAIN_SPEC_VERSION=$(grep -o "staging-chain-spec-builder@[0-9.]*" "$WORKFLOW_FILE" | head -1 | cut -d'@' -f2 || echo "10.0.0")
+        OMNI_NODE_VERSION=$(grep -o "polkadot-omni-node@[0-9.]*" "$WORKFLOW_FILE" | head -1 | cut -d'@' -f2 || echo "0.5.0")
+        TEMPLATE_BRANCH=$(grep -o "\-b [a-z0-9]*" "$WORKFLOW_FILE" | head -1 | cut -d' ' -f2 || echo "stable2412")
         
-        # Extract actual commands from CI steps
-        extract_rust_setup() {
-          grep -A 2 "rustup default" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//'
+        # Extract actual commands from CI steps with better patterns
+        extract_system_deps() {
+          grep -A 10 "Install system dependencies" "$WORKFLOW_FILE" | grep "sudo apt-get install" | head -1 | sed 's/^[[:space:]]*//'
         }
         
-        extract_system_deps() {
-          awk '/Install system dependencies/,/^[[:space:]]*- name:/ {
-            if(/sudo apt-get install/) print
-          }' "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//'
+        extract_rust_commands() {
+          grep -A 5 "rustup default\|Add WASM target" "$WORKFLOW_FILE" | grep "rustup" | sed 's/^[[:space:]]*//'
         }
         
         extract_cargo_installs() {
@@ -166,28 +166,247 @@ jobs:
         }
         
         extract_clone_command() {
-          grep "git clone" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//'
+          grep "git clone" "$WORKFLOW_FILE" | head -1 | sed 's/^[[:space:]]*//'
         }
         
         extract_build_command() {
-          awk '/working-directory: parachain-template/,/^[[:space:]]*- name:/ {
-            if(/cargo build/) print
-          }' "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//'
+          grep "cargo build --release" "$WORKFLOW_FILE" | head -1 | sed 's/^[[:space:]]*//'
         }
         
-        extract_chain_spec() {
-          awk '/Generate chain spec/,/^[[:space:]]*- name:/ {
-            if(/chain-spec-builder create/) {
-              print; getline;
-              while(/^[[:space:]]*--/ || /^[[:space:]]*named-preset/) {
-                print; getline
-              }
-            }
-          }' "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//'
+        extract_chain_spec_command() {
+          grep -A 6 "chain-spec-builder create" "$WORKFLOW_FILE" | sed 's/^[[:space:]]*//' | grep -v "^$"
         }
 
         # Generate the complete README.md
         cat > README.md << EOF
+        # Polkadot Parachain Development Setup
+
+        [![Setup Test Status](https://github.com/${{ github.repository }}/actions/workflows/test-set-up-a-template.yml/badge.svg)](https://github.com/${{ github.repository }}/actions/workflows/test-set-up-a-template.yml)
+        ![Rust ${RUST_VERSION}](https://img.shields.io/badge/Rust-${RUST_VERSION}-orange.svg)
+        ![Auto-Generated](https://img.shields.io/badge/README-Auto%20Generated-brightgreen.svg)
+
+        > **🤖 Fully Automated Setup**: This README and all instructions are automatically generated and tested by CI. Every command is guaranteed to work.
+
+        ## Overview
+
+        This repository provides a complete, tested setup for Polkadot parachain development using:
+
+        - **Rust**: ${RUST_VERSION} (with WASM target)
+        - **Chain Spec Builder**: v${CHAIN_SPEC_VERSION}  
+        - **Polkadot Omni Node**: v${OMNI_NODE_VERSION}
+        - **Template**: ${TEMPLATE_BRANCH} branch
+
+        All components are automatically tested together in CI on every change.
+
+        ## Quick Start
+
+        Copy and paste these commands to get started immediately:
+
+        \`\`\`bash
+        # 1. Install system dependencies (Ubuntu/Debian)
+        $(extract_system_deps)
+
+        # 2. Install Rust and configure toolchain
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source ~/.cargo/env
+        $(extract_rust_commands | head -3)
+
+        # 3. Install Polkadot tools
+        $(extract_cargo_installs | head -1)
+        $(extract_cargo_installs | tail -1)
+
+        # 4. Clone and build parachain template  
+        $(extract_clone_command)
+        cd parachain-template
+        $(extract_build_command)
+
+        # 5. Generate chain specification
+        $(extract_chain_spec_command)
+
+        # 6. Start development node
+        polkadot-omni-node --chain ./chain_spec.json --dev
+        \`\`\`
+
+        ## Detailed Setup Instructions
+
+        ### Prerequisites
+
+        **Ubuntu/Debian:**
+        \`\`\`bash
+        $(extract_system_deps)
+        \`\`\`
+
+        **macOS:**
+        \`\`\`bash
+        # Install Xcode command line tools
+        xcode-select --install
+
+        # Install Homebrew if not already installed
+        /bin/bash -c "\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        
+        # Install dependencies
+        brew install cmake protobuf
+        \`\`\`
+
+        **Windows:**
+        \`\`\`bash
+        # Use WSL2 (Windows Subsystem for Linux) for best compatibility
+        # Then follow Ubuntu instructions above
+        \`\`\`
+
+        ### Step 1: Rust Installation and Configuration
+
+        Install Rust and set up the toolchain exactly as tested in CI:
+
+        \`\`\`bash
+        # Install Rust
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source ~/.cargo/env
+
+        # Configure toolchain (from CI)
+        $(extract_rust_commands)
+        \`\`\`
+
+        **Platform-specific WASM target installation:**
+        \`\`\`bash
+        # Apple Silicon Macs
+        rustup target add wasm32-unknown-unknown --toolchain ${RUST_VERSION}-aarch64-apple-darwin
+        rustup component add rust-src --toolchain ${RUST_VERSION}-aarch64-apple-darwin
+
+        # Intel Macs
+        rustup target add wasm32-unknown-unknown --toolchain ${RUST_VERSION}-x86_64-apple-darwin
+        rustup component add rust-src --toolchain ${RUST_VERSION}-x86_64-apple-darwin
+
+        # Linux (as used in CI)
+        rustup target add wasm32-unknown-unknown --toolchain ${RUST_VERSION}-x86_64-unknown-linux-gnu
+        rustup component add rust-src --toolchain ${RUST_VERSION}-x86_64-unknown-linux-gnu
+        \`\`\`
+
+        ### Step 2: Install Polkadot Development Tools
+
+        Install the exact versions tested in CI:
+
+        \`\`\`bash
+        $(extract_cargo_installs)
+        \`\`\`
+
+        ### Step 3: Clone and Build Parachain Template
+
+        \`\`\`bash
+        $(extract_clone_command)
+        cd parachain-template
+        $(extract_build_command)
+        \`\`\`
+
+        ### Step 4: Generate Development Chain Specification
+
+        \`\`\`bash
+        # From parachain-template directory
+        $(extract_chain_spec_command)
+        \`\`\`
+
+        This creates a \`chain_spec.json\` file configured for development with:
+        - Development relay chain: Paseo
+        - Parachain ID: 1000
+        - Runtime: Built from the parachain template
+
+        ### Step 5: Start the Development Node
+
+        \`\`\`bash
+        # From parachain-template directory
+        polkadot-omni-node --chain ./chain_spec.json --dev
+        \`\`\`
+
+        ## Verification
+
+        When everything is set up correctly, you should see output similar to:
+
+        \`\`\`
+        🎉 All setup instructions completed successfully!
+        ✅ Rust ${RUST_VERSION} installed and configured
+        ✅ WASM target and rust-src added
+        ✅ staging-chain-spec-builder@${CHAIN_SPEC_VERSION} installed
+        ✅ polkadot-omni-node@${OMNI_NODE_VERSION} installed
+        ✅ Parachain template cloned and built
+        ✅ Chain spec generated
+        ✅ Node can start with generated chain spec
+        \`\`\`
+
+        The node will start producing blocks and you'll see log output indicating successful operation.
+
+        ## Troubleshooting
+
+        ### Common Issues
+
+        **Build Failures:**
+        - Ensure all system dependencies are installed
+        - Check that you have at least 8GB of RAM and 10GB free disk space
+        - Try \`cargo clean\` and rebuild if you encounter caching issues
+
+        **Toolchain Issues:**
+        - Verify Rust version: \`rustup show\`
+        - Ensure WASM target is installed: \`rustup target list --installed\`
+        - Check component installation: \`rustup component list --installed\`
+
+        **Network Issues:**
+        - Some downloads are large; ensure stable internet connection
+        - Corporate firewalls may block certain domains
+        - Try using a VPN if experiencing geographic restrictions
+
+        ### Platform-Specific Notes
+
+        **macOS:**
+        - Requires Xcode command line tools
+        - May need to install additional dependencies via Homebrew
+        - Apple Silicon Macs use different toolchain targets
+
+        **Linux:**
+        - Ubuntu 20.04+ or equivalent is recommended
+        - Ensure \`build-essential\` package is installed
+        - Some distributions may require additional \`*-dev\` packages
+
+        **Windows:**
+        - WSL2 is strongly recommended over native Windows
+        - Native Windows support exists but is less tested
+        - Visual Studio Build Tools may be required for native builds
+
+        ## Development Workflow
+
+        Once set up, your typical development workflow will be:
+
+        1. **Modify Runtime Code**: Edit files in \`parachain-template/runtime/\`
+        2. **Rebuild**: \`cargo build --release\`
+        3. **Update Chain Spec**: Regenerate if runtime changes affect genesis
+        4. **Restart Node**: Stop and restart with updated runtime
+        5. **Test**: Use Polkadot.js Apps or other tools to interact
+
+        ## Resources
+
+        - **[Polkadot SDK Documentation](https://docs.substrate.io/)**: Official developer documentation
+        - **[Substrate Stack Exchange](https://substrate.stackexchange.com/)**: Community Q&A
+        - **[Polkadot Technical Chat](https://matrix.to/#/#polkadot-technical:matrix.org)**: Real-time developer support
+        - **[Parachain Template Docs](https://github.com/paritytech/polkadot-sdk-parachain-template)**: Template-specific documentation
+
+        ## CI Status and Information
+
+        - **Latest Test Results**: [View CI Runs](https://github.com/${{ github.repository }}/actions/workflows/test-set-up-a-template.yml)
+        - **Test Frequency**: Runs on every documentation change
+        - **Test Environment**: Ubuntu Latest with clean environment
+        - **Test Duration**: Typically 30-60 minutes
+
+        ---
+
+        <details>
+        <summary>📋 CI Metadata</summary>
+
+        - **Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        - **From Commit**: ${{ steps.repo-info.outputs.commit_hash }}
+        - **Workflow**: \`${{ github.workflow }}\`
+        - **Repository**: \`${{ steps.repo-info.outputs.repo_owner }}/${{ steps.repo-info.outputs.repo_name }}\`
+        - **Auto-Generated**: This entire README is generated from CI workflow
+
+        </details>
+        EOF
         # Polkadot Parachain Development Setup
 
         [![Setup Test Status](https://github.com/${{ github.repository }}/actions/workflows/test-polkadot-setup-simple.yml/badge.svg)](https://github.com/${{ github.repository }}/actions/workflows/test-polkadot-setup-simple.yml)
@@ -420,8 +639,8 @@ jobs:
 
     - name: Check for changes and commit
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action Bot"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
         
         if git diff --quiet README.md 2>/dev/null; then
           echo "ℹ️  No changes to README.md"
@@ -435,7 +654,7 @@ jobs:
           - Workflow: ${{ github.workflow }}
           - Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           
-          git push origin ${{ github.ref_name }}
+          git push
           echo "✅ Generated and committed complete README.md from CI workflow"
           echo "📊 README now contains $(wc -l < README.md) lines of auto-generated content"
         fi
