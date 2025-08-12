@@ -151,7 +151,7 @@ jobs:
         echo "✅ chain_spec.json created successfully"
         echo "File size: $(stat -c%s chain_spec.json) bytes"
         
-        if [ ! -f "target/release/parachain-template-runtime" ]; then
+        if [ ! -f "target/release/wbuild/parachain-template-runtime" ]; then
           echo "❌ parachain binary was not created"
           exit 1
         fi
