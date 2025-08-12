@@ -1,5 +1,5 @@
 # .github/workflows/my-custom-tests.yml
-name: My Custom Tests
+name: Run the Parachain Template
 
 on: [push, workflow_dispatch]
 
