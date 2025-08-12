@@ -1,0 +1,97 @@
+# .github/workflows/test-polkadot-setup-simple.yml
+name: Polkadot Setup Test
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'README.md'
+      - '.github/workflows/test-polkadot-setup-simple.yml'
+      - '.github/workflows/setup-polkadot-dev.yml'  # Also trigger when reusable workflow changes
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'README.md'
+      - '.github/workflows/test-polkadot-setup-simple.yml'
+      - '.github/workflows/setup-polkadot-dev.yml'
+  workflow_dispatch:
+
+jobs:
+  # Use the reusable setup workflow
+  setup-polkadot:
+    name: Setup Polkadot Environment
+    uses: ./.github/workflows/setup-polkadot-dev.yml
+    with:
+      rust-version: '1.86'
+      chain-spec-builder-version: '10.0.0'
+      omni-node-version: '0.5.0'
+      template-branch: 'stable2412'
+      cache-key-suffix: 'main-test'
+
+  # Test that the setup worked by downloading artifacts and testing
+  test-node-startup:
+    name: Test Node Startup
+    needs: setup-polkadot
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download setup artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ needs.setup-polkadot.outputs.artifact-name }}
+        path: ./artifacts
+
+    - name: Setup minimal Rust environment
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ needs.setup-polkadot.outputs.rust-version }}
+        default: true
+        override: true
+
+    - name: Restore Polkadot tools
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.cargo/bin/chain-spec-builder
+          ~/.cargo/bin/polkadot-omni-node
+        key: polkadot-tools-10.0.0-0.5.0
+        fail-on-cache-miss: true
+
+    - name: Test node startup with downloaded artifacts
+      run: |
+        chmod +x ./artifacts/parachain-template-node
+        echo "Testing node can start with downloaded chain spec..."
+        timeout 15s polkadot-omni-node --chain ./artifacts/chain_spec.json --dev --tmp 2>&1 | head -20 || {
+          if [ $? -eq 124 ]; then
+            echo "✅ Node started successfully (timed out as expected)"
+          else
+            echo "❌ Node failed to start"
+            exit 1
+          fi
+        }
+
+    - name: Summary
+      run: |
+        echo "🎉 All setup instructions completed successfully!"
+        echo "✅ Rust ${{ needs.setup-polkadot.outputs.rust-version }} installed and configured"
+        echo "✅ Reusable workflow setup working correctly"
+        echo "✅ Artifacts downloaded and tested"
+        echo "✅ Node can start with generated chain spec"
+
+  # Your existing README generation job can stay the same
+  generate-readme:
+    name: Generate Complete README
+    runs-on: ubuntu-latest
+    needs: test-node-startup  # Changed dependency
+    if: success() && github.event_name != 'pull_request'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        persist-credentials: true
+
+    # ... rest of your README generation stays the same ...

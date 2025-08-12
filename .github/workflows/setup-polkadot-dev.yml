@@ -1,0 +1,181 @@
+# .github/workflows/setup-polkadot-dev.yml
+name: Reusable Polkadot Development Setup
+
+on:
+  workflow_call:
+    inputs:
+      rust-version:
+        description: 'Rust version to install'
+        required: false
+        type: string
+        default: '1.86'
+      chain-spec-builder-version:
+        description: 'Chain spec builder version'
+        required: false
+        type: string
+        default: '10.0.0'
+      omni-node-version:
+        description: 'Polkadot omni node version'
+        required: false
+        type: string
+        default: '0.5.0'
+      template-branch:
+        description: 'Parachain template branch'
+        required: false
+        type: string
+        default: 'stable2412'
+      upload-artifacts:
+        description: 'Upload built artifacts for other jobs'
+        required: false
+        type: boolean
+        default: true
+      cache-key-suffix:
+        description: 'Additional suffix for cache keys'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      rust-version:
+        description: 'Installed Rust version'
+        value: ${{ jobs.setup.outputs.rust-version }}
+      artifact-name:
+        description: 'Name of uploaded artifacts'
+        value: ${{ jobs.setup.outputs.artifact-name }}
+
+jobs:
+  setup:
+    name: Setup Polkadot Development Environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    
+    outputs:
+      rust-version: ${{ steps.rust-info.outputs.version }}
+      artifact-name: polkadot-setup-${{ github.run_id }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+        df -h
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential curl git clang libssl-dev llvm libudev-dev protobuf-compiler
+
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ inputs.rust-version }}
+        default: true
+        override: true
+
+    - name: Add WASM target and rust-src
+      run: |
+        rustup target add wasm32-unknown-unknown
+        rustup component add rust-src
+
+    - name: Get Rust info
+      id: rust-info
+      run: |
+        echo "version=$(rustc --version | cut -d' ' -f2)" >> $GITHUB_OUTPUT
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-cargo-${{ inputs.rust-version }}-${{ inputs.cache-key-suffix }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-${{ inputs.rust-version }}-${{ inputs.cache-key-suffix }}-
+          ${{ runner.os }}-cargo-${{ inputs.rust-version }}-
+          ${{ runner.os }}-cargo-
+
+    - name: Cache Polkadot tools
+      id: tools-cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/chain-spec-builder
+          ~/.cargo/bin/polkadot-omni-node
+        key: polkadot-tools-${{ inputs.chain-spec-builder-version }}-${{ inputs.omni-node-version }}
+
+    - name: Install staging-chain-spec-builder
+      if: steps.tools-cache.outputs.cache-hit != 'true'
+      run: cargo install --locked staging-chain-spec-builder@${{ inputs.chain-spec-builder-version }}
+
+    - name: Install polkadot-omni-node
+      if: steps.tools-cache.outputs.cache-hit != 'true'
+      run: cargo install --locked polkadot-omni-node@${{ inputs.omni-node-version }}
+
+    - name: Clone parachain template
+      run: git clone -b ${{ inputs.template-branch }} https://github.com/paritytech/polkadot-sdk-parachain-template.git parachain-template
+
+    - name: Cache parachain build
+      id: build-cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          parachain-template/target
+        key: parachain-build-${{ inputs.template-branch }}-${{ inputs.rust-version }}-${{ hashFiles('parachain-template/**/Cargo.toml') }}
+
+    - name: Build parachain
+      if: steps.build-cache.outputs.cache-hit != 'true'
+      working-directory: parachain-template
+      run: cargo build --release --locked
+
+    - name: Generate chain spec
+      working-directory: parachain-template
+      run: |
+        chain-spec-builder create -t development \
+          --relay-chain paseo \
+          --para-id 1000 \
+          --runtime ./target/release/wbuild/parachain-template-runtime/parachain_template_runtime.compact.compressed.wasm \
+          named-preset development
+
+    - name: Verify setup
+      working-directory: parachain-template
+      run: |
+        if [ ! -f "chain_spec.json" ]; then
+          echo "❌ chain_spec.json was not created"
+          exit 1
+        fi
+        echo "✅ chain_spec.json created successfully"
+        echo "File size: $(stat -c%s chain_spec.json) bytes"
+        
+        if [ ! -f "target/release/parachain-template-node" ]; then
+          echo "❌ parachain binary was not created"
+          exit 1
+        fi
+        echo "✅ parachain binary created successfully"
+        echo "Binary size: $(stat -c%s target/release/parachain-template-node) bytes"
+
+    - name: Upload artifacts
+      if: inputs.upload-artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: polkadot-setup-${{ github.run_id }}
+        path: |
+          parachain-template/target/release/parachain-template-node
+          parachain-template/chain_spec.json
+          parachain-template/target/release/wbuild/parachain-template-runtime/parachain_template_runtime.compact.compressed.wasm
+        retention-days: 1
+
+    - name: Summary
+      run: |
+        echo "🎉 Polkadot development environment setup completed!"
+        echo "✅ Rust ${{ steps.rust-info.outputs.version }} installed and configured"
+        echo "✅ WASM target and rust-src added"
+        echo "✅ staging-chain-spec-builder@${{ inputs.chain-spec-builder-version }} installed"
+        echo "✅ polkadot-omni-node@${{ inputs.omni-node-version }} installed" 
+        echo "✅ Parachain template cloned and built"
+        echo "✅ Chain spec generated"
+        if [ "${{ inputs.upload-artifacts }}" == "true" ]; then
+          echo "✅ Artifacts uploaded as: polkadot-setup-${{ github.run_id }}"
+        fi
