@@ -1,5 +1,5 @@
 # .github/workflows/setup-polkadot-dev.yml
-name: Reusable Polkadot Development Setup
+name: Polkadot Development Setup
 
 on:
   workflow_call:
