@@ -85,7 +85,7 @@ jobs:
         echo "version=$(rustc --version | cut -d' ' -f2)" >> $GITHUB_OUTPUT
 
     - name: Cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry/index
@@ -99,7 +99,7 @@ jobs:
 
     - name: Cache Polkadot tools
       id: tools-cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/chain-spec-builder
@@ -119,7 +119,7 @@ jobs:
 
     - name: Cache parachain build
       id: build-cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           parachain-template/target
@@ -158,7 +158,7 @@ jobs:
 
     - name: Upload artifacts
       if: inputs.upload-artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: polkadot-setup-${{ github.run_id }}
         path: |

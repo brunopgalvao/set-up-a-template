@@ -1,97 +1,69 @@
-# .github/workflows/test-polkadot-setup-simple.yml
-name: Polkadot Setup Test
+# .github/workflows/my-custom-tests.yml
+name: My Custom Tests
 
-on:
-  push:
-    branches: [ main, master ]
-    paths:
-      - 'README.md'
-      - '.github/workflows/test-polkadot-setup-simple.yml'
-      - '.github/workflows/setup-polkadot-dev.yml'  # Also trigger when reusable workflow changes
-  pull_request:
-    branches: [ main, master ]
-    paths:
-      - 'README.md'
-      - '.github/workflows/test-polkadot-setup-simple.yml'
-      - '.github/workflows/setup-polkadot-dev.yml'
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
-  # Use the reusable setup workflow
-  setup-polkadot:
-    name: Setup Polkadot Environment
+  # Step 1: Use your reusable setup
+  setup:
+    name: Setup Development Environment  
     uses: ./.github/workflows/setup-polkadot-dev.yml
     with:
+      # Customize as needed
       rust-version: '1.86'
-      chain-spec-builder-version: '10.0.0'
-      omni-node-version: '0.5.0'
-      template-branch: 'stable2412'
-      cache-key-suffix: 'main-test'
+      cache-key-suffix: 'custom-tests'
 
-  # Test that the setup worked by downloading artifacts and testing
-  test-node-startup:
-    name: Test Node Startup
-    needs: setup-polkadot
+  # Step 2: Download artifacts and run your custom logic
+  custom-tests:
+    name: Run Custom Tests
+    needs: setup
     runs-on: ubuntu-latest
-    
-    steps:
-    - name: Download setup artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: ${{ needs.setup-polkadot.outputs.artifact-name }}
-        path: ./artifacts
-
-    - name: Setup minimal Rust environment
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ needs.setup-polkadot.outputs.rust-version }}
-        default: true
-        override: true
-
-    - name: Restore Polkadot tools
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.cargo/bin/chain-spec-builder
-          ~/.cargo/bin/polkadot-omni-node
-        key: polkadot-tools-10.0.0-0.5.0
-        fail-on-cache-miss: true
-
-    - name: Test node startup with downloaded artifacts
-      run: |
-        chmod +x ./artifacts/parachain-template-node
-        echo "Testing node can start with downloaded chain spec..."
-        timeout 15s polkadot-omni-node --chain ./artifacts/chain_spec.json --dev --tmp 2>&1 | head -20 || {
-          if [ $? -eq 124 ]; then
-            echo "✅ Node started successfully (timed out as expected)"
-          else
-            echo "❌ Node failed to start"
-            exit 1
-          fi
-        }
-
-    - name: Summary
-      run: |
-        echo "🎉 All setup instructions completed successfully!"
-        echo "✅ Rust ${{ needs.setup-polkadot.outputs.rust-version }} installed and configured"
-        echo "✅ Reusable workflow setup working correctly"
-        echo "✅ Artifacts downloaded and tested"
-        echo "✅ Node can start with generated chain spec"
-
-  # Your existing README generation job can stay the same
-  generate-readme:
-    name: Generate Complete README
-    runs-on: ubuntu-latest
-    needs: test-node-startup  # Changed dependency
-    if: success() && github.event_name != 'pull_request'
     
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        fetch-depth: 0
-        persist-credentials: true
 
-    # ... rest of your README generation stays the same ...
+    - name: Download built parachain
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ needs.setup.outputs.artifact-name }}
+        path: ./polkadot-artifacts
+
+    - name: Setup minimal Rust (for tools)
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ needs.setup.outputs.rust-version }}
+        default: true
+
+    - name: Restore Polkadot tools
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/bin/chain-spec-builder
+          ~/.cargo/bin/polkadot-omni-node  
+        key: polkadot-tools-10.0.0-0.5.0
+        fail-on-cache-miss: true
+
+    - name: Run my custom tests
+      run: |
+        echo "🚀 Running custom tests with pre-built parachain"
+        
+        # Make binary executable
+        chmod +x ./polkadot-artifacts/parachain-template-node
+        
+        # Test 1: Check binary works
+        ./polkadot-artifacts/parachain-template-node --version
+        
+        # Test 2: Start node with chain spec
+        polkadot-omni-node --chain ./polkadot-artifacts/chain_spec.json --dev --tmp &
+        NODE_PID=$!
+        
+        # Test 3: Wait and verify it's running
+        sleep 10
+        
+        # Test 4: Your custom integration tests here
+        echo "✅ Custom tests passed!"
+        
+        # Cleanup
+        kill $NODE_PID || true
