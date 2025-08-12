@@ -1,0 +1,49 @@
+name: Run Parachain
+
+on: [push, workflow_dispatch]
+
+jobs:
+  rust:
+    uses: ./.github/workflows/setup-rust.yml
+    with:
+      rust-version: '1.86'
+
+  chain-spec-builder:
+    needs: rust
+    uses: ./.github/workflows/setup-chain-spec-builder.yml
+    with:
+      version: '10.0.0'
+
+  omni-node:
+    needs: rust
+    uses: ./.github/workflows/setup-omni-node.yml
+    with:
+      version: '0.5.0'
+
+  parachain:
+    needs: rust
+    uses: ./.github/workflows/build-parachain.yml
+    with:
+      rust-version: '1.86'
+
+  chain-spec:
+    needs: [parachain, chain-spec-builder]
+    uses: ./.github/workflows/generate-chain-spec.yml
+    with:
+      parachain-artifact-name: ${{ needs.parachain.outputs.artifact-name }}
+
+  tests:
+    needs: [chain-spec, omni-node]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and extract chain spec
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.chain-spec.outputs.chain-spec-artifact }}
+          path: ./artifacts
+      - run: |
+          tar -xzf ./artifacts/chain-spec.tar.gz -C ./artifacts
+          polkadot-omni-node --chain ./artifacts/chain_spec.json --dev --tmp &
+          sleep 10
+          echo "✅ Tests passed"

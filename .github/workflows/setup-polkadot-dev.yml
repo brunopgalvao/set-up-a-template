@@ -151,7 +151,7 @@ jobs:
         echo "✅ chain_spec.json created successfully"
         echo "File size: $(stat -c%s chain_spec.json) bytes"
         
-        if [ ! -f "target/release/parachain-template-node" ]; then
+        if [ ! -f "target/release/parachain-template-runtime" ]; then
           echo "❌ parachain binary was not created"
           exit 1
         fi
@@ -164,7 +164,7 @@ jobs:
       with:
         name: polkadot-setup-${{ github.run_id }}
         path: |
-          parachain-template/target/release/parachain-template-node
+          parachain-template/target/release/parachain-template-runtime
           parachain-template/chain_spec.json
           parachain-template/target/release/wbuild/parachain-template-runtime/parachain_template_runtime.compact.compressed.wasm
         retention-days: 1

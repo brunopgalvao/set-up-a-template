@@ -1,0 +1,27 @@
+name: Setup Chain Spec Builder
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        default: '10.0.0'
+        type: string
+        required: false
+    outputs:
+      cache-key:
+        value: chain-spec-builder-${{ inputs.version }}
+
+jobs:
+  setup-chain-spec-builder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache Chain Spec Builder
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/chain-spec-builder
+          key: chain-spec-builder-${{ inputs.version }}
+
+      - name: Install Chain Spec Builder
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cargo install --locked staging-chain-spec-builder@${{ inputs.version }}

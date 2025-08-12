@@ -1,0 +1,54 @@
+name: Build Parachain Template
+
+on:
+  workflow_call:
+    inputs:
+      rust-version:
+        default: '1.86'
+        type: string
+      template-branch:
+        default: 'stable2412'
+        type: string
+      cache-key-suffix:
+        default: ''
+        type: string
+    outputs:
+      artifact-name:
+        value: parachain-${{ github.run_id }}
+
+jobs:
+  build-parachain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Clone parachain template
+        run: git clone -b ${{ inputs.template-branch }} https://github.com/paritytech/polkadot-sdk-parachain-template.git parachain-template
+
+      - name: Cache build
+        id: build-cache
+        uses: actions/cache@v4
+        with:
+          path: parachain-template/target
+          key: parachain-build-${{ inputs.template-branch }}-${{ inputs.rust-version }}-${{ hashFiles('parachain-template/**/Cargo.toml') }}
+
+      - name: Build parachain
+        if: steps.build-cache.outputs.cache-hit != 'true'
+        working-directory: parachain-template
+        run: cargo build --release --frozen
+
+      - name: Compress artifacts
+        run: |
+          mkdir -p build-output
+          cp parachain-template/target/release/parachain-template-node build-output/
+          cp parachain-template/target/release/wbuild/parachain-template-runtime/parachain_template_runtime.compact.compressed.wasm build-output/
+          tar -czf parachain.tar.gz -C build-output .
+
+      - name: Upload compressed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parachain-${{ github.run_id }}
+          path: parachain.tar.gz
+          retention-days: 1

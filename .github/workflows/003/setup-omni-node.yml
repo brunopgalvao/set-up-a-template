@@ -1,0 +1,27 @@
+name: Setup Polkadot Omni Node
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        default: '0.5.0'
+        type: string
+        required: false
+    outputs:
+      cache-key:
+        value: polkadot-omni-node-${{ inputs.version }}
+
+jobs:
+  setup-omni-node:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache Polkadot Omni Node
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/polkadot-omni-node
+          key: polkadot-omni-node-${{ inputs.version }}
+
+      - name: Install Polkadot Omni Node
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: cargo install --locked polkadot-omni-node@${{ inputs.version }}
